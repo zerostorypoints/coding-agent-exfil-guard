@@ -5,6 +5,6 @@
   "author": { "name": "Zero Story Points", "url": "https://github.com/zerostorypoints" },
   "homepage": "https://github.com/zerostorypoints/coding-agent-exfil-guard",
   "repository": "https://github.com/zerostorypoints/coding-agent-exfil-guard",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": ["security", "prompt-injection", "exfiltration", "mcp", "hooks", "lethal-trifecta"]
 }

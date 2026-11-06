@@ -115,7 +115,7 @@ def decide_pre(ev: Event, cfg: dict) -> Decision:
 def decide_post(ev: Event, cfg: dict) -> Decision:
     t = classify.parse_tool(ev.tool)
     d = Decision(ALLOW)
-    if classify.is_trusted_server(t, cfg):
+    if classify.is_trusted_server(t, cfg) or t.name in classify.SELF_ECHO_TOOLS:
         return d
     src = classify.untrusted_source(t, ev.tool_input or {}, cfg)
     findings = detect.scan_text(ev.output or "")

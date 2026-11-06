@@ -73,6 +73,9 @@ _NET_FETCH = re.compile(
     r"|\b(Invoke-WebRequest|iwr|Invoke-RestMethod|irm|Start-BitsTransfer)\b|\.Download(String|File|Data)\b",
     re.I)
 
+# Tools whose output only echoes what the agent itself wrote; not scanned.
+SELF_ECHO_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit", "TodoWrite"}
+
 # Shell tools: Claude Code's Bash and PowerShell (Windows); Codex's shell later.
 SHELL_TOOLS = {"Bash", "PowerShell"}
 
