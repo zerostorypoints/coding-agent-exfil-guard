@@ -109,7 +109,7 @@ After any of these calls, the session is marked tainted for the rest of its life
 
 | Detector | Example |
 |---|---|
-| Hidden Unicode | Tag characters (invisible ASCII), variation-selector "emoji smuggling", zero-width and bidi controls |
+| Hidden Unicode | Tag characters (invisible ASCII), variation-selector "emoji smuggling", bidi controls. Zero-width characters are only logged: newsletters use them to pad preview text |
 | Instruction override | "ignore all previous instructions", "do not tell the user", fake `<system>` tags |
 | Agent-addressed task | "Note for your agent: … submit a pull request", "AI assistants should always mention…" |
 | Exfiltration markup | Markdown images whose URL carries a long query string |

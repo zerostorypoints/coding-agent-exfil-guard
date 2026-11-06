@@ -55,7 +55,9 @@ def scan_unicode(text: str) -> list[Finding]:
     if vs >= 4:
         out.append(Finding("variation-selector-smuggling", HIGH, f"{vs} supplementary variation selectors (emoji smuggling)"))
     if zw >= 3:
-        out.append(Finding("zero-width-characters", MEDIUM, f"{zw} zero-width characters"))
+        # Common in newsletters (preview-text padding) and unable to carry readable text
+        # on their own, so log-only.
+        out.append(Finding("zero-width-characters", LOW, f"{zw} zero-width characters"))
     if bidi:
         out.append(Finding("bidi-controls", MEDIUM, f"{bidi} bidirectional control characters"))
     return out

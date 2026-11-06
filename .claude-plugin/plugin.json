@@ -1,6 +1,6 @@
 {
   "name": "coding-agent-exfil-guard",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Taint-gated outbound control for Claude Code: after a session reads untrusted content (web, mail, chat, downloads), sending, sharing, publishing and edits to agent config require your approval. Flags likely prompt injections and exfiltration-shaped URLs, with desktop notifications.",
   "author": { "name": "Zero Story Points", "url": "https://github.com/zerostorypoints" },
   "homepage": "https://github.com/zerostorypoints/coding-agent-exfil-guard",
