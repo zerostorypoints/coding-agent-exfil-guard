@@ -1,0 +1,10 @@
+{
+  "mode": "monitor",
+  "tainted_outbound_decision": "ask",
+  "notify_min_severity": "medium",
+  "notify_command": null,
+  "trusted_domains": ["docs.python.org"],
+  "extra_outbound_tools": [],
+  "extra_protected_paths": [],
+  "gate_browser_input": true
+}

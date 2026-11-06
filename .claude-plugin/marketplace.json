@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "zerostorypoints",
+  "description": "Plugins from Zero Story Points",
+  "owner": { "name": "Zero Story Points", "url": "https://github.com/zerostorypoints" },
+  "plugins": [
+    {
+      "name": "coding-agent-exfil-guard",
+      "description": "Taint-gated outbound control and prompt-injection alerts for Claude Code.",
+      "category": "security",
+      "source": "./"
+    }
+  ]
+}

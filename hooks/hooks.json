@@ -1,0 +1,29 @@
+{
+  "description": "coding-agent-exfil-guard: taint tracking, outbound gating, injection alerts",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/bin/exfil-guard\" hook claude", "timeout": 10, "onFailure": "block" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/bin/exfil-guard\" hook claude", "timeout": 15 }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/bin/exfil-guard\" hook claude", "timeout": 15 }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""exfil-guard command line.
+
+  exfil-guard hook claude          Claude Code hook entry point (reads stdin)
+  exfil-guard status [N]           show the last N logged events
+  exfil-guard sessions             list tainted sessions
+  exfil-guard untaint AGENT SID    clear a session's taint (asks when run by an agent)
+  exfil-guard selftest             run built-in scenarios against the policy
+  exfil-guard doctor               check the installation
+"""
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "src"))
+
+from exfil_guard import cli  # noqa: E402
+
+sys.exit(cli.main(sys.argv[1:]))
