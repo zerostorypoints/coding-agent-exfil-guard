@@ -5,8 +5,8 @@ content (a web page, an email, a chat message, a downloaded file), sending, shar
 publishing and edits to the agent's own configuration need your approval. Likely
 prompt injections and exfiltration-shaped URLs raise a desktop notification.
 
-Status: **alpha (0.1.0)**. Claude Code adapter works and is tested. A Codex CLI adapter is
-planned ([docs/codex.md](docs/codex.md)). Python 3 standard library only, no dependencies (tested on Python 3.15, macOS).
+Status: **alpha (0.2.0)**. Claude Code adapter works and is tested end to end on macOS; Windows support is implemented and unit-tested but not yet run on a Windows machine. A Codex CLI adapter is
+planned ([docs/codex.md](docs/codex.md)). Python 3.9+ standard library only, no dependencies (tested on Python 3.15, macOS).
 
 ## Why
 
@@ -65,14 +65,43 @@ bin/exfil-guard doctor
 
 To try it without installing, start a session with `claude --plugin-dir /path/to/checkout`.
 
+**Rollback** (from a terminal, not through the agent; it does not depend on the hooks):
+
+```bash
+claude plugin disable coding-agent-exfil-guard@zerostorypoints
+```
+
+Know this command before you switch to `enforce`. The hooks use `onFailure: "block"`: if the hook
+cannot start (no Python, no Git Bash on Windows), every tool call is blocked until you disable
+the plugin.
+
+### Windows
+
+- Requires **Git for Windows** (Git Bash) and **Python 3.9+**. Hooks run with `shell: "bash"`;
+  the launcher [bin/hook.sh](bin/hook.sh) probes `python3`, `python` and `py -3` in that order,
+  skipping the Microsoft Store `python3` stub. Set `EXFIL_GUARD_PYTHON` to override.
+- If `bash` resolves to WSL, set `CLAUDE_CODE_GIT_BASH_PATH` to Git Bash.
+- The PowerShell tool is covered: `Invoke-WebRequest`/`Invoke-RestMethod` uploads,
+  `Send-MailMessage`, BITS and .NET uploads count as outbound; `Set-Content`/`Out-File`/
+  `New-Item`/registry writes on protected paths ask; scheduled tasks, services and Run keys are
+  persistence.
+- Paths are normalised (`C:\Users\x\.claude\settings.json`, `$env:USERPROFILE`, Git Bash
+  `/c/...`). Managed settings at `C:\Program Files\ClaudeCode\` are protected.
+- Notifications are WinRT toasts through Windows PowerShell.
+- Config: `%APPDATA%\exfil-guard\config.json`; state: `%LOCALAPPDATA%\exfil-guard\`.
+- Check with `py -3 bin\exfil-guard doctor`, then run the fresh-session test:
+  `powershell -ExecutionPolicy Bypass -File scripts\e2e-claude.ps1`.
+
 ## Verify it on your machine
 
 A rule you have written is not yet a rule that works. Test it in a **freshly started session**,
 with a **control run** that proves the test can tell "blocked" from "failed for another reason":
 
 ```bash
-scripts/e2e-claude.sh
+scripts/e2e-claude.sh            # macOS, Linux
 ```
+
+On Windows: `scripts\e2e-claude.ps1`.
 
 It runs two headless sessions with the plugin loaded. The control session posts to
 `127.0.0.1:9` (nothing leaves the machine) and must be allowed. The test session first reads a
@@ -83,13 +112,19 @@ read from the event log, not from the model's own account.
 
 ## Configuration
 
-`~/.config/exfil-guard/config.json` (see [config.example.json](config.example.json)):
+`~/.config/exfil-guard/config.json` (Windows: `%APPDATA%\exfil-guard\config.json`; see
+[config.example.json](config.example.json)).
+
+Every alert is shown in the session: a line for you (`systemMessage`), a warning for the model
+(`additionalContext`) after a suspected injection, and in `enforce` mode the approval prompt with
+the reason. Desktop notifications are an extra channel for when you are not watching.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `mode` | `enforce` | `monitor` logs and notifies but never blocks. Use it for the first days to tune. |
 | `tainted_outbound_decision` | `ask` | `deny` for a stricter setup |
 | `notify_command` | built-in | argv list with `{title}` and `{message}`, e.g. an [ntfy](https://ntfy.sh) `curl` for phone alerts |
+| `desktop_notifications` | `true` | `false` keeps messages inside the agent session only |
 | `notify_min_severity` | `medium` | `high` for fewer notifications |
 | `trusted_domains` | `[]` | domains WebFetch/navigation may query with parameters in tainted sessions |
 | `trusted_servers` | app-internal | MCP server-name regexes ignored entirely |
@@ -121,7 +156,9 @@ Running `untaint` through the agent asks for approval, as do edits to the guard'
 - **Content already in the context stays there.** The PostToolUse warning cannot unread text.
 - **Claude Code desktop and CLI only.** claude.ai web and mobile do not run local hooks.
 - Hooks fire for hosted connector tools in the desktop app (verified on Claude Code 2.1.316,
-  macOS). Re-run `scripts/e2e-claude.sh` after upgrades.
+  macOS). Re-run the e2e test after upgrades.
+- PowerShell commands that build URLs or paths at runtime (string concatenation, variables) are
+  not resolved; only literal text is checked.
 
 ## Related work
 

@@ -1,8 +1,8 @@
 """Configuration and filesystem locations.
 
 Locations (override everything with EXFIL_GUARD_HOME, used by tests):
-  config: $XDG_CONFIG_HOME/exfil-guard/config.json   (default ~/.config/...)
-  state:  $XDG_STATE_HOME/exfil-guard/               (default ~/.local/state/...)
+  config: $XDG_CONFIG_HOME/exfil-guard/config.json   (default ~/.config/...; Windows %APPDATA%)
+  state:  $XDG_STATE_HOME/exfil-guard/               (default ~/.local/state/...; Windows %LOCALAPPDATA%)
 """
 from __future__ import annotations
 
@@ -20,6 +20,8 @@ DEFAULTS: dict = {
     # A list is run as argv with "{title}" and "{message}" substituted, e.g.
     # ["curl", "-s", "-d", "{title}: {message}", "https://ntfy.sh/your-topic"]
     "notify_command": None,
+    # False = messages only inside the agent session, no desktop notifications.
+    "desktop_notifications": True,
     "notify_min_severity": "medium",
     # Domains WebFetch/browser may query even when the session is tainted.
     "trusted_domains": [],
@@ -45,7 +47,8 @@ def config_path() -> Path:
     h = home_override()
     if h:
         return h / "config.json"
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    base = os.environ.get("XDG_CONFIG_HOME") or (
+        os.environ.get("APPDATA") if os.name == "nt" else None) or os.path.expanduser("~/.config")
     return Path(base) / "exfil-guard" / "config.json"
 
 
@@ -53,7 +56,8 @@ def state_dir() -> Path:
     h = home_override()
     if h:
         return h / "state"
-    base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+    base = os.environ.get("XDG_STATE_HOME") or (
+        os.environ.get("LOCALAPPDATA") if os.name == "nt" else None) or os.path.expanduser("~/.local/state")
     return Path(base) / "exfil-guard"
 
 

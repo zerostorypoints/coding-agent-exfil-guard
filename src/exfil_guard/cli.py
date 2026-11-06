@@ -127,13 +127,21 @@ def doctor() -> int:
             print(f"claude code: version check failed: {e}")
     else:
         print("claude code: not found on PATH")
+    if os.name == "nt":
+        bash = shutil.which("bash")
+        print(f"git bash: {bash or 'NOT FOUND - hooks run with shell: bash; install Git for Windows'}")
+        problems += not bash
+        if bash and "system32" in bash.lower():
+            print("  warning: 'bash' resolves to WSL; set CLAUDE_CODE_GIT_BASH_PATH to Git Bash")
     rc = run_scenarios(verbose=False)
     print(f"selftest: {'ok' if rc == 0 else 'FAILED (run: exfil-guard selftest)'}")
     problems += rc
     ev = state.recent(1000)
     print(f"events logged: {len(ev)}; last: {ev[-1]['ts'] if ev else '-'}")
     print("\nA rule counts as working only after a fresh-session test with a control run:")
-    print("  scripts/e2e-claude.sh")
+    print("  scripts/e2e-claude.ps1 (Windows)" if os.name == "nt" else "  scripts/e2e-claude.sh")
+    print("\nRollback, from a terminal (not through the agent; does not depend on the hooks):")
+    print("  claude plugin disable coding-agent-exfil-guard@zerostorypoints")
     return 1 if problems else 0
 
 
