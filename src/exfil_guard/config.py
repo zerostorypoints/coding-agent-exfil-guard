@@ -22,7 +22,11 @@ DEFAULTS: dict = {
     "notify_command": None,
     # False = messages only inside the agent session, no desktop notifications.
     "desktop_notifications": True,
-    "notify_min_severity": "medium",
+    # high: desktop alerts only for critical events (blocked exfiltration, a secret in an
+    # outbound call, an explicit attempt to override the agent). Everything else still
+    # appears inside the session and in the log. "medium" adds every outbound call after
+    # untrusted input and weaker injection signals.
+    "notify_min_severity": "high",
     # Domains WebFetch/browser may query even when the session is tainted.
     "trusted_domains": [],
     # MCP server names (regex, matched against the server segment of the tool name)

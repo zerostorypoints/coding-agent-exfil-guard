@@ -1,7 +1,7 @@
 {
   "mode": "monitor",
   "tainted_outbound_decision": "ask",
-  "notify_min_severity": "medium",
+  "notify_min_severity": "high",
   "notify_command": null,
   "trusted_domains": ["docs.python.org"],
   "extra_outbound_tools": [],

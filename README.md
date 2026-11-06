@@ -163,7 +163,7 @@ optional; see [config.example.json](config.example.json).
 | `mode` | `enforce` | `monitor` logs and alerts but never blocks |
 | `tainted_outbound_decision` | `ask` | `deny` for a stricter setup |
 | `desktop_notifications` | `true` | `false` keeps alerts inside the session only |
-| `notify_min_severity` | `medium` | `high` for fewer notifications |
+| `notify_min_severity` | `high` | `high`: desktop alerts only for critical events (blocked exfiltration, a secret in an outbound call, an attempt to override the agent). `medium` adds every outbound call after untrusted input |
 | `notify_command` | built-in | argv with `{title}` and `{message}`, e.g. `["curl", "-s", "-d", "{title}: {message}", "https://ntfy.sh/<topic>"]` for phone alerts |
 | `trusted_domains` | `[]` | domains WebFetch/navigation may query with parameters in tainted sessions |
 | `trusted_servers` | app-internal | MCP server-name regexes to ignore |
