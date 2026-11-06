@@ -177,6 +177,10 @@ after a suspected injection (`additionalContext`), the approval prompt with the 
 `enforce` mode, and a desktop notification (macOS Notification Center, `notify-send` on Linux,
 a toast on Windows).
 
+On macOS, install [terminal-notifier](https://github.com/julienXX/terminal-notifier)
+(`brew install terminal-notifier`) and the guard uses it. Without it the guard falls back to
+`osascript`, whose notifications belong to Script Editor: clicking one opens Script Editor.
+
 ### Inspecting state
 
 State lives in `~/.local/state/exfil-guard/` (Windows: `%LOCALAPPDATA%\exfil-guard\`).

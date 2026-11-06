@@ -175,6 +175,17 @@ class Windows(unittest.TestCase):
         self.assertNotIn("calc", " ".join(argv))
         self.assertEqual(env["EXFIL_GUARD_MESSAGE"], "m$(calc)")
 
+    def test_macos_prefers_terminal_notifier(self):
+        from unittest import mock
+        from exfil_guard import notify
+        with mock.patch.object(notify, "_terminal_notifier", return_value="/x/terminal-notifier"):
+            argv, _ = notify.build_argv({}, "t", "m", "high", platform="darwin")
+        self.assertEqual(argv[0], "/x/terminal-notifier")
+        with mock.patch.object(notify, "_terminal_notifier", return_value=None), \
+             mock.patch.object(notify.shutil, "which", return_value="/usr/bin/osascript"):
+            argv, _ = notify.build_argv({}, "t", "m", "high", platform="darwin")
+        self.assertEqual(argv[0], "osascript")
+
     def test_desktop_notifications_off(self):
         from exfil_guard import notify
         notify.send({"desktop_notifications": False, "notify_command": ["false"]}, "t", "m", "high")

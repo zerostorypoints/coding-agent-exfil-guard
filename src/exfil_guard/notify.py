@@ -30,11 +30,29 @@ def _escape_applescript(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _terminal_notifier():
+    # Hooks may run with a minimal PATH, so also look in the Homebrew prefixes.
+    found = shutil.which("terminal-notifier")
+    if found:
+        return found
+    for p in ("/opt/homebrew/bin/terminal-notifier", "/usr/local/bin/terminal-notifier"):
+        if os.access(p, os.X_OK):
+            return p
+    return None
+
+
 def build_argv(cfg: dict, title: str, message: str, severity: str, platform: str = sys.platform):
     """Return (argv, extra_env) or None. Separated out for tests."""
     cmd = cfg.get("notify_command")
     if cmd:
         return [str(a).replace("{title}", title).replace("{message}", message) for a in cmd], {}
+    if platform == "darwin":
+        # terminal-notifier first: osascript notifications belong to Script Editor,
+        # so clicking one opens Script Editor. terminal-notifier's just dismiss.
+        tn = _terminal_notifier()
+        if tn:
+            return [tn, "-title", title, "-message", message, "-group", "exfil-guard",
+                    "-sound", "Basso"], {}
     if platform == "darwin" and shutil.which("osascript"):
         return ["osascript", "-e",
                 f'display notification "{_escape_applescript(message)}" '
