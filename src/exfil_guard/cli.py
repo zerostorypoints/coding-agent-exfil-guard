@@ -147,10 +147,85 @@ def doctor() -> int:
     return 1 if problems else 0
 
 
+_REVIEW_CATS = ("protected-write", "outbound-tainted")
+
+
+def review(n: int = 2000, show: int = 20) -> int:
+    """List recent prompts (asked, or would have asked in monitor mode), newest first,
+    grouped by what they were about. Numbers are stable until the next review."""
+    groups: dict = {}
+    for e in state.recent(n):
+        if e.get("category") not in _REVIEW_CATS or not (e.get("would") or e.get("action")) \
+                or ("target" not in e and "input" not in e):  # events logged before 0.3.0
+            continue
+        key = (e["category"], e.get("tool"), tuple(e.get("target") or []) or (e.get("input") or "")[:40])
+        g = groups.setdefault(key, {"count": 0, **e})
+        g["count"] += 1
+        g.update(ts=e.get("ts"), input=e.get("input"), target=e.get("target"))
+    items = sorted(groups.values(), key=lambda g: g.get("ts") or "", reverse=True)[:show]
+    (config.state_dir()).mkdir(parents=True, exist_ok=True)
+    (config.state_dir() / "review.json").write_text(json.dumps(items, ensure_ascii=False))
+    if not items:
+        print("No prompts to review.")
+        return 0
+    from . import rules
+    for i, g in enumerate(items, 1):
+        what = "sends out" if g["category"] == "outbound-tainted" else "writes agent config"
+        tgt = ", ".join(g.get("target") or []) or "(destination unknown)"
+        print(f"{i:>3}. {g['count']:>4}x  {g.get('tool')} {what} -> {tgt}")
+        if g.get("input"):
+            print(f"         {g['input'][:110]!r}")
+        sug = rules.suggest(g)
+        if sug:
+            print(f"         allow with: exfil-guard allow {i}   (rule {json.dumps(sug)})")
+    return 0
+
+
+def allow(rest: list[str]) -> int:
+    from . import rules
+    if not rest or not rest[0].isdigit():
+        print("usage: exfil-guard allow <number from review> [--by destination|tool|command] [--note TEXT]",
+              file=sys.stderr)
+        return 2
+    try:
+        items = json.loads((config.state_dir() / "review.json").read_text())
+    except FileNotFoundError:
+        print("Run 'exfil-guard review' first.", file=sys.stderr)
+        return 2
+    i = int(rest[0])
+    if not 1 <= i <= len(items):
+        print(f"No item {i} in the last review.", file=sys.stderr)
+        return 2
+    by = rest[rest.index("--by") + 1] if "--by" in rest else "destination"
+    rule = rules.suggest(items[i - 1], by)
+    if not rule:
+        print("Cannot build a rule for this item; add one to allow_rules in config.json.", file=sys.stderr)
+        return 2
+    if "--note" in rest:
+        rule["note"] = rest[rest.index("--note") + 1]
+    rules.add(rule)
+    print(f"Added to {config.config_path()}:\n  {json.dumps(rule)}")
+    return 0
+
+
+def list_rules(rest: list[str]) -> int:
+    from . import rules
+    if rest[:1] == ["rm"] and len(rest) == 2 and rest[1].isdigit():
+        r = rules.remove(int(rest[1]) - 1)
+        print(f"Removed: {json.dumps(r)}")
+        return 0
+    rs = rules.load_raw().get("allow_rules", [])
+    if not rs:
+        print("No allow rules.")
+    for i, r in enumerate(rs, 1):
+        print(f"{i:>3}. {json.dumps(r)}{'' if rules.valid(r) else '   (invalid, ignored)'}")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print(__doc__ or "", end="")
-        print("usage: exfil-guard {hook claude|status|sessions|untaint|selftest|doctor}")
+        print("usage: exfil-guard {review|allow N|rules [rm N]|status|sessions|untaint|selftest|doctor|hook claude}")
         return 2
     cmd, rest = argv[0], argv[1:]
     if cmd == "hook":
@@ -175,6 +250,12 @@ def main(argv: list[str]) -> int:
             r = st.get("reasons", [{}])[0]
             print(f"{p.stem}  since {st.get('since')}  first: {r.get('reason')}")
         return 0
+    if cmd == "review":
+        return review(show=int(rest[0]) if rest else 20)
+    if cmd == "allow":
+        return allow(rest)
+    if cmd == "rules":
+        return list_rules(rest)
     if cmd == "untaint" and len(rest) == 2:
         ok = state.clear(rest[0], rest[1])
         print("cleared" if ok else "no such tainted session")

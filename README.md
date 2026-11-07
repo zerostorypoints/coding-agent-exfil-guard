@@ -167,6 +167,7 @@ optional; see [config.example.json](config.example.json).
 | `notify_command` | built-in | argv with `{title}` and `{message}`, e.g. `["curl", "-s", "-d", "{title}: {message}", "https://ntfy.sh/<topic>"]` for phone alerts |
 | `trusted_domains` | `[]` | domains WebFetch/navigation may query with parameters in tainted sessions |
 | `trusted_servers` | app-internal | MCP server-name regexes to ignore |
+| `allow_rules` | `[]` | traffic you marked as safe, see [Marking traffic as safe](#marking-traffic-as-safe) |
 | `trusted_git_remotes` | `[]` | `git push` and `gh pr`/`issue`/`release` writes to these repos skip the tainted-session prompt. Globs on `host/owner/repo`, e.g. `["github.com/your-org/*"]`. Secrets are still checked. A public repo you own is still a way out, so list only owners whose pushes you are happy to allow |
 | `untrusted_paths` | `[]` | extra folders whose files taint on `Read` (e.g. an attachments folder) |
 | `extra_untrusted_read_tools`, `extra_outbound_tools` | `[]` | regexes on the bare tool name |
@@ -181,6 +182,39 @@ a toast on Windows).
 On macOS, install [terminal-notifier](https://github.com/julienXX/terminal-notifier)
 (`brew install terminal-notifier`) and the guard uses it. Without it the guard falls back to
 `osascript`, whose notifications belong to Script Editor: clicking one opens Script Editor.
+
+### Marking traffic as safe
+
+When the guard prompts (or, in monitor mode, would prompt) for something you do on purpose,
+mark it as safe instead of turning the guard off:
+
+```bash
+bin/exfil-guard review          # recent prompts, grouped, newest first, with a suggested rule
+bin/exfil-guard allow 3 --note "deploy scripts to my NAS"
+bin/exfil-guard rules           # list rules;  bin/exfil-guard rules rm 2  to delete one
+```
+
+`allow` adds a rule to `allow_rules` in `config.json`. By default the rule matches the
+destination of item 3; `--by tool` or `--by command` builds a broader rule from the tool name
+or the start of the command. You can also write rules by hand:
+
+```json
+"allow_rules": [
+  {"category": "outbound", "destination": "ssh:nas.local", "note": "my NAS"},
+  {"category": "outbound", "destination": "mcp:gmail/create_draft"},
+  {"category": "protected-write", "destination": "path:/Users/me/.claude/skills/my-skill/*"}
+]
+```
+
+Every field present must match. `destination` is a glob over the call's destinations:
+`git:github.com/owner/repo`, `ssh:host`, `http:host`, `mcp:server/tool`, `path:/abs/path`.
+A call with several destinations matches only if all of them do. `tool` is a regex on the tool
+name, `command` a regex searched in the command or path, `category` is `outbound` or
+`protected-write`.
+
+Rules never override a denied exfiltration-shaped URL, a secret in an outbound call, or a write
+to the guard's own configuration. When the agent itself runs `exfil-guard allow` or
+`rules rm`, the guard asks first, like any change to its configuration.
 
 ### Inspecting state
 

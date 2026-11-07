@@ -11,7 +11,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from . import classify, detect, notify, state
+from . import classify, detect, notify, rules, state
 
 ALLOW, ASK, DENY = "allow", "ask", "deny"
 
@@ -34,6 +34,7 @@ class Decision:
     model_context: str = ""    # extra context for the model (post events)
     user_message: str = ""     # one-line message for the user's UI
     summary: str = ""          # plain-language version of reason, for monitor-mode messages
+    context: dict = field(default_factory=dict)  # logged with prompts, used by "exfil-guard review"
     findings: list = field(default_factory=list)
 
 
@@ -54,14 +55,14 @@ def _alert(cfg, ev: Event, severity: str, title: str, msg: str, key: str) -> Non
 def _finalize(cfg: dict, ev: Event, d: Decision, category: str) -> Decision:
     if d.action != ALLOW and cfg.get("mode") == "monitor":
         state.log({"agent": ev.agent, "session": ev.session, "tool": ev.tool, "event": ev.kind,
-                   "category": category, "would": d.action, "reason": d.reason})
+                   "category": category, "would": d.action, "reason": d.reason, **d.context})
         verb = "blocked" if d.action == DENY else "asked you first"
         return Decision(action=ALLOW,
                         user_message=f"exfil-guard (monitor only): {d.summary or d.reason} In enforce mode it would have {verb}.")
     if d.action != ALLOW or category:
         state.log({"agent": ev.agent, "session": ev.session, "tool": ev.tool, "event": ev.kind,
                    "category": category, "action": d.action, "reason": d.reason,
-                   "findings": [f.as_dict() for f in d.findings]})
+                   "findings": [f.as_dict() for f in d.findings], **d.context})
     return d
 
 
@@ -107,13 +108,20 @@ def decide_pre(ev: Event, cfg: dict) -> Decision:
     if pw:
         level, desc = pw
         if level == classify.ALWAYS or tainted:
+            text = desc.split(" ", 1)[-1].replace("write touching ", "")
+            dests = ["path:" + classify._expand(text, ev.cwd)] if not desc.startswith("persistence") else []
+            rule = rules.find(cfg, "protected-write", ev.tool, text, dests)
+            if rule:
+                return _finalize(cfg, ev, Decision(ALLOW, f"allowed by your rule: {rule.get('note') or rule}"),
+                                 "user-rule")
             why = "agent configuration/persistence" if level == classify.ALWAYS else \
                   f"agent instructions in a session that read {_tainted_summary(st)}"
             reason = f"exfil-guard: {desc} modifies {why}. Approve only if you asked for this change."
             if tainted:
                 _alert(cfg, ev, "medium", "Agent wants to change its own settings",
                        "It read outside content earlier. Approve only if you asked for this.", "protected-write")
-            return _finalize(cfg, ev, Decision(ASK, reason, summary="The agent is changing its own settings or instructions."), "protected-write")
+            return _finalize(cfg, ev, Decision(ASK, reason, summary="The agent is changing its own settings or instructions.",
+                                               context={"target": dests, "input": text[:300]}), "protected-write")
         _finalize(cfg, ev, Decision(ALLOW, desc), "protected-write-clean")
 
     # 3. Outbound channels.
@@ -132,6 +140,12 @@ def decide_pre(ev: Event, cfg: dict) -> Decision:
                 classify.trusted_git_destination(str(inp.get("command") or ""), ev.cwd, cfg):
             return _finalize(cfg, ev, Decision(ALLOW, ob), "outbound-trusted-repo")
         if tainted:
+            dests = classify.destinations(t, inp, ev.cwd)
+            text = str(inp.get("command") or "") if t.name in classify.SHELL_TOOLS else json.dumps(inp, ensure_ascii=False)
+            rule = rules.find(cfg, "outbound", ev.tool, text, dests)
+            if rule:
+                return _finalize(cfg, ev, Decision(ALLOW, f"allowed by your rule: {rule.get('note') or rule}"),
+                                 "user-rule")
             action = cfg.get("tainted_outbound_decision", ASK)
             reason = (f"exfil-guard: the agent wants to send something out ({ob}) after reading "
                       f"outside content ({_tainted_summary(st)}). Content like that can carry hidden "
@@ -139,7 +153,8 @@ def decide_pre(ev: Event, cfg: dict) -> Decision:
             _alert(cfg, ev, "medium", "Agent wants to send something out",
                    f"After reading outside content it wants to run: {ob}.", "outbound-tainted")
             return _finalize(cfg, ev, Decision(action, reason,
-                            summary=f"The agent is sending something out ({ob}) after reading outside content."),
+                            summary=f"The agent is sending something out ({ob}) after reading outside content.",
+                            context={"target": dests, "input": text[:300]}),
                              "outbound-tainted")
         return _finalize(cfg, ev, Decision(ALLOW, ob), "outbound-clean")
 

@@ -323,6 +323,50 @@ def git_destinations(cmd: str, cwd: str | None) -> list[str] | None:
     return out
 
 
+_SSH_ARG_OPTS = set("bcDEeFIiJLlmOoPpQRSWw")
+
+
+def ssh_hosts(cmd: str) -> list[str]:
+    hosts = []
+    for m in re.finditer(r"\bssh\s+([^;&|]*)", cmd):
+        toks = m.group(1).split()
+        i = 0
+        while i < len(toks):
+            tk = toks[i]
+            if tk.startswith("-"):
+                i += 2 if (len(tk) == 2 and tk[1] in _SSH_ARG_OPTS) else 1
+                continue
+            hosts.append(tk.strip("'\"").split("@")[-1].lower())
+            break
+    return hosts
+
+
+def destinations(t: Tool, tool_input: dict, cwd: str | None = None) -> list[str]:
+    """Where a call sends data or writes, as typed strings for allow rules."""
+    out: list[str] = []
+    if t.name in SHELL_TOOLS:
+        cmd = str(tool_input.get("command") or "")
+        if re.search(r"\bgit\b[^;&|]*\bpush\b|\bgh\s+(pr|issue|release)\b", cmd):
+            out += ["git:" + d for d in (git_destinations(cmd, cwd) or [])]
+        out += ["ssh:" + h for h in ssh_hosts(cmd)]
+        for m in re.finditer(r"\b(scp|rsync|sftp)\b([^;&|]*)", cmd):
+            for h in re.findall(r"(?:^|\s)(?:[^\s@:/]+@)?([A-Za-z0-9][A-Za-z0-9.\-]*):", m.group(2)):
+                out.append("ssh:" + h.lower())
+        if _NET_FETCH.search(cmd):
+            out += ["http:" + _host(u) for u in urls_in(cmd) if _host(u)]
+    elif t.name == "WebFetch" or (is_browser(t) and tool_input.get("url")):
+        h = _host(str(tool_input.get("url") or ""))
+        if h:
+            out.append("http:" + h)
+    elif t.is_mcp:
+        out.append(f"mcp:{t.server}/{t.bare}")
+    if t.name in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+        fp = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
+        if fp:
+            out.append("path:" + _expand(fp, cwd))
+    return list(dict.fromkeys(out))
+
+
 def trusted_git_destination(cmd: str, cwd: str | None, cfg: dict) -> bool:
     import fnmatch
     pats = [p.lower().rstrip("/") for p in cfg.get("trusted_git_remotes", [])]
@@ -400,7 +444,7 @@ _WRITE_OP = re.compile(
 )
 _PERSIST_CMD = re.compile(
     r"\bcrontab\b(?!\s+-l)|\blaunchctl\s+(load|bootstrap|submit|enable)\b"
-    r"|\bexfil-guard\b\s+(untaint|clear|disable|uninstall)"
+    r"|\bexfil-guard\b\s+(untaint|clear|disable|uninstall|allow|rules\s+rm)"
     r"|\bclaude\s+plugins?\s+(disable|uninstall|remove|marketplace\s+remove)\b"
     r"|\bschtasks(\.exe)?\s+/create\b|\bRegister-ScheduledTask\b|\bNew-Service\b"
     r"|\breg(\.exe)?\s+add\b.*\\(Run|RunOnce)\b|\b(Set|New)-ItemProperty\b.*\\(Run|RunOnce)\b",
