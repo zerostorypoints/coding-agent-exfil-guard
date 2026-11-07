@@ -293,6 +293,17 @@ class Windows(unittest.TestCase):
             finally:
                 os.environ.pop("EXFIL_GUARD_HOME", None)
 
+    def test_suggested_path_rule_covers_all_worktrees(self):
+        from exfil_guard import rules
+        ev = {"category": "protected-write", "tool": "Bash",
+              "target": ["path:/u/repo/.claude/worktrees/wt-1/.claude/hooks/a.sh"]}
+        r = rules.suggest(ev)
+        self.assertEqual(r["destination"], ["path:/u/repo/.claude/hooks/*",
+                                            "path:/u/repo/.claude/worktrees/*/.claude/hooks/*"])
+        for p in ("/u/repo/.claude/hooks/a.sh", "/u/repo/.claude/worktrees/wt-2/.claude/hooks/b.sh"):
+            self.assertTrue(rules.matches(r, "protected-write", "Bash", "", ["path:" + p]), p)
+        self.assertFalse(rules.matches(r, "protected-write", "Bash", "", ["path:/u/other/.claude/hooks/a.sh"]))
+
     def test_windows_toast_passes_text_via_env(self):
         from exfil_guard import notify
         argv, env = notify.build_argv({}, "t'it\"le", "m$(calc)", "high", platform="win32")

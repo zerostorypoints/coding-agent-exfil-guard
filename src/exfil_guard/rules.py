@@ -52,8 +52,9 @@ def matches(rule: dict, category: str, tool: str, text: str, dests: list[str]) -
     if rule.get("command") and not re.search(rule["command"], text or "", re.I | re.S):
         return False
     if rule.get("destination"):
-        pat = str(rule["destination"]).lower()
-        if not dests or not all(fnmatch.fnmatchcase(d.lower(), pat) for d in dests):
+        pats = rule["destination"] if isinstance(rule["destination"], list) else [rule["destination"]]
+        pats = [str(p).lower() for p in pats]
+        if not dests or not all(any(fnmatch.fnmatchcase(d.lower(), p) for p in pats) for d in dests):
             return False
     return True
 
@@ -80,7 +81,16 @@ def suggest(event: dict, by: str = "destination") -> dict | None:
             t = targets[0]
             if t.startswith("path:"):
                 common = os.path.commonpath([x[5:] for x in targets]) if len(targets) > 1 else os.path.dirname(t[5:])
-                rule["destination"] = "path:" + common.rstrip("/") + "/*"
+                common = common.rstrip("/")
+                # A rule for one worktree is useless in the next one: cover the repo
+                # itself and all its worktrees.
+                m = re.match(r"(.*)/\.claude/worktrees/[^/]+(/.*)?$", common)
+                if m:
+                    rest = m.group(2) or ""
+                    rule["destination"] = [f"path:{m.group(1)}{rest}/*",
+                                           f"path:{m.group(1)}/.claude/worktrees/*{rest}/*"]
+                else:
+                    rule["destination"] = "path:" + common + "/*"
             else:
                 rule["destination"] = t
             return rule

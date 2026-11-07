@@ -189,7 +189,7 @@ When the guard prompts (or, in monitor mode, would prompt) for something you do 
 mark it as safe instead of turning the guard off:
 
 ```bash
-bin/exfil-guard review          # recent prompts, grouped, newest first, with a suggested rule
+bin/exfil-guard review          # what the guard asked about, in plain words, newest first (-v: details)
 bin/exfil-guard allow 3 --note "deploy scripts to my NAS"
 bin/exfil-guard rules           # list rules;  bin/exfil-guard rules rm 2  to delete one
 ```
@@ -208,7 +208,9 @@ or the start of the command. You can also write rules by hand:
 
 Every field present must match. `destination` is a glob over the call's destinations:
 `git:github.com/owner/repo`, `ssh:host`, `http:host`, `mcp:server/tool`, `path:/abs/path`.
-A call with several destinations matches only if all of them do. `tool` is a regex on the tool
+A call with several destinations matches only if all of them do. `destination` may also be a
+list of globs; a suggested rule for a path inside a worktree covers the repository and all its
+worktrees. `tool` is a regex on the tool
 name, `command` a regex searched in the command or path, `category` is `outbound` or
 `protected-write`.
 

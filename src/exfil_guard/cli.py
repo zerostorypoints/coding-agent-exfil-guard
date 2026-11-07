@@ -149,8 +149,84 @@ def doctor() -> int:
 
 _REVIEW_CATS = ("protected-write", "outbound-tainted")
 
+# (path regex, what the agent did, why it matters) - plain language for "review"
+_PATH_KINDS = [
+    (r"/exfil-guard/", "touched exfil-guard's own files",
+     "An injected instruction could try to switch the guard off this way."),
+    (r"/\.claude/hooks/", "changed hook scripts",
+     "Hooks run automatically on every agent action, so a planted hook would keep working in later sessions."),
+    (r"/memory/", "wrote to its own memory",
+     "Later sessions read this memory, so a planted instruction would carry over."),
+    (r"/\.claude/(skills|agents|commands|plugins|output-styles)/", "changed a skill, agent or plugin",
+     "These are instructions and code the agent loads in later sessions."),
+    (r"/\.claude/settings(\.local)?\.json$", "changed Claude Code settings",
+     "Settings decide which hooks run and what the agent may do without asking."),
+    (r"/(CLAUDE|AGENTS|GEMINI|CLAUDE\.local)\.md$", "changed the agent's instruction file",
+     "Every later session in this project follows it."),
+    (r"/\.github/workflows/", "changed a GitHub Actions workflow",
+     "Workflows run code on GitHub with the repository's secrets."),
+    (r"/\.(mcp|claude)\.json$", "changed the agent's tool connections",
+     "They decide which servers the agent talks to."),
+    (r"/(\.(zshrc|zprofile|zshenv|bashrc|bash_profile|profile|gitconfig)|Library/LaunchAgents/|\.ssh/|\.git/hooks/)",
+     "changed a login, startup or git configuration file", "These run code automatically, outside the agent."),
+    (r"/\.claude/", "changed agent configuration", "The agent loads it in later sessions."),
+]
+_OUT_WHY = ("Earlier in that session it read outside content (web, mail, chat), which can hide "
+            "instructions. Fine if you asked for this.")
 
-def review(n: int = 2000, show: int = 20) -> int:
+
+def _project_of(path: str) -> str:
+    m = re.search(r"/\.claude/projects/-(?:Users|home)-[^-]+-(.+?)/memory/", path)
+    if m:
+        return m.group(1).split("--claude-worktrees-")[0]
+    m = re.search(r"([^/]+)/\.claude/worktrees/([^/]+)/", path)
+    if m:
+        return f"{m.group(1)} (worktree {m.group(2)})"
+    d = os.path.dirname(path)
+    while d and d != os.path.dirname(d):
+        if os.path.exists(os.path.join(d, ".git")):
+            return os.path.basename(d)
+        d = os.path.dirname(d)
+    return os.path.dirname(path).replace(os.path.expanduser("~"), "~")
+
+
+def _describe(g: dict) -> tuple[str, str, str]:
+    """(what happened, why it matters, what 'allow' would stop asking about)"""
+    targets = g.get("target") or []
+    if g["category"] == "protected-write":
+        path = targets[0][5:] if targets and targets[0].startswith("path:") else ""
+        if not path:
+            cmd = re.sub(r"\s+", " ", (g.get("input") or "").replace("command: ", "", 1))[:90]
+            return (f"The agent ran a command that changes what runs on its own or turns protection off: {cmd}",
+                    "Scheduled jobs and plugin changes keep working after this session ends.", "this command")
+        did, why = "changed agent configuration", "The agent loads it in later sessions."
+        for rx, d, w in _PATH_KINDS:
+            if re.search(rx, path):
+                did, why = d, w
+                break
+        proj = _project_of(path)
+        where = proj.split(" (worktree")[0]
+        return (f"{proj}: the agent {did}.", why, f"this kind of change in {where}")
+    parts = []
+    for t in targets:
+        kind, _, val = t.partition(":")
+        if kind == "git":
+            parts.append("GitHub repository " + val.split("/", 1)[-1])
+        elif kind == "ssh":
+            parts.append("server " + val)
+        elif kind == "http":
+            parts.append(val)
+        elif kind == "mcp":
+            server, _, tool = val.partition("/")
+            parts.append(tool if re.fullmatch(r"[0-9a-f-]{36}", server) else f"{tool} ({server})")
+    dest = ", ".join(dict.fromkeys(parts))
+    if dest:
+        return (f"The agent sent data to {dest} after reading outside content.", _OUT_WHY, f"sending data to {dest}")
+    return (f"The agent sent data out ({g.get('tool')}) after reading outside content.", _OUT_WHY,
+            "this command")
+
+
+def review(n: int = 2000, show: int = 20, verbose: bool = False) -> int:
     """List recent prompts (asked, or would have asked in monitor mode), newest first,
     grouped by what they were about. Numbers are stable until the next review."""
     groups: dict = {}
@@ -166,18 +242,27 @@ def review(n: int = 2000, show: int = 20) -> int:
     (config.state_dir()).mkdir(parents=True, exist_ok=True)
     (config.state_dir() / "review.json").write_text(json.dumps(items, ensure_ascii=False))
     if not items:
-        print("No prompts to review.")
+        print("Nothing to review.")
         return 0
     from . import rules
+    print("Things the guard asked about (or would have, in monitor mode), newest first.\n"
+          "If one is something you do on purpose, allow it and the guard stops asking.\n")
     for i, g in enumerate(items, 1):
-        what = "sends out" if g["category"] == "outbound-tainted" else "writes agent config"
-        tgt = ", ".join(g.get("target") or []) or "(destination unknown)"
-        print(f"{i:>3}. {g['count']:>4}x  {g.get('tool')} {what} -> {tgt}")
-        if g.get("input"):
-            print(f"         {g['input'][:110]!r}")
-        sug = rules.suggest(g)
-        if sug:
-            print(f"         allow with: exfil-guard allow {i}   (rule {json.dumps(sug)})")
+        what, why, covers = _describe(g)
+        times = "1 time" if g["count"] == 1 else f"{g['count']} times"
+        print(f"{i:>3}. {what}")
+        print(f"     {why}")
+        when = f"     {times}, last {(g.get('ts') or '')[:16].replace('T', ' ')}."
+        if any("/exfil-guard/" in t for t in g.get("target") or []):
+            print(when + "  The guard always asks about its own files; this cannot be allowed.")
+        else:
+            print(when + f"  To stop asking about {covers}: exfil-guard allow {i}")
+        if verbose:
+            print(f"     details: {', '.join(g.get('target') or []) or g.get('input')}")
+            sug = rules.suggest(g)
+            if sug:
+                print(f"     rule: {json.dumps(sug)}")
+        print()
     return 0
 
 
@@ -197,6 +282,9 @@ def allow(rest: list[str]) -> int:
         print(f"No item {i} in the last review.", file=sys.stderr)
         return 2
     by = rest[rest.index("--by") + 1] if "--by" in rest else "destination"
+    if any("/exfil-guard/" in t for t in items[i - 1].get("target") or []):
+        print("The guard always asks about its own files; this cannot be allowed.", file=sys.stderr)
+        return 2
     rule = rules.suggest(items[i - 1], by)
     if not rule:
         print("Cannot build a rule for this item; add one to allow_rules in config.json.", file=sys.stderr)
@@ -251,7 +339,8 @@ def main(argv: list[str]) -> int:
             print(f"{p.stem}  since {st.get('since')}  first: {r.get('reason')}")
         return 0
     if cmd == "review":
-        return review(show=int(rest[0]) if rest else 20)
+        nums = [a for a in rest if a.isdigit()]
+        return review(show=int(nums[0]) if nums else 20, verbose="-v" in rest)
     if cmd == "allow":
         return allow(rest)
     if cmd == "rules":
