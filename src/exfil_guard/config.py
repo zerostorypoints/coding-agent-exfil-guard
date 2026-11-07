@@ -29,6 +29,10 @@ DEFAULTS: dict = {
     "notify_min_severity": "high",
     # Domains WebFetch/browser may query even when the session is tainted.
     "trusted_domains": [],
+    # git push / gh pr|issue|release to these repositories is allowed in a tainted
+    # session. Glob patterns on host/owner/repo, e.g. "github.com/your-org/*".
+    # A public repo is still a way out: list only owners whose pushes you trust.
+    "trusted_git_remotes": [],
     # MCP server names (regex, matched against the server segment of the tool name)
     # whose tools are never treated as untrusted sources or outbound sinks.
     "trusted_servers": [r"^ccd_", r"^visualize$"],

@@ -192,9 +192,12 @@ _BASH_OUTBOUND = [
     (r"\bwget\b.*--(post|body)", "HTTP upload via wget"),
     (r"\b(scp|sftp|rsync|rclone)\b", "file transfer"),
     (r"\b(nc|ncat|netcat|socat|telnet)\b\s", "raw socket"),
-    (r"\b(sendmail|mail|mailx|mutt)\b\s", "local mail"),
+    (r"(^|[;&|(]|\$\()\s*(sendmail|mail|mailx|mutt)\s", "local mail"),
     (r"osascript\b.*\b(Mail|Messages|Slack|Outlook)\b", "AppleScript messaging"),
-    (r"\bssh\b\s+\S+.*\b(cat|tee|dd|curl)\b", "remote command"),
+    # Data piped or redirected into ssh, or written on the remote side. Plain reads
+    # over ssh (ssh host 'cat log') bring data in, not out.
+    (r"\|\s*ssh\b|\bssh\b[^|;&]*\s<\s*\S|\bssh\b\s+\S+.*(\bcat\s*>|\btee\b|\bdd\b.*\bof=|\bcurl\b)",
+     "remote command"),
     # PowerShell (Windows)
     (r"\b(Invoke-WebRequest|iwr|Invoke-RestMethod|irm)\b.*(-Method\s+['\"]?(Post|Put|Patch)\b|-Body\b|-InFile\b|-Form\b)",
      "HTTP upload via PowerShell"),
@@ -253,11 +256,82 @@ def outbound(t: Tool, tool_input: dict, cfg: dict) -> str | None:
                 return f"browser navigation with query string to {_host(url)}"
         return None
     if t.is_mcp:
+        if re.match(r"(get|list|search|read|fetch|delete|trash|remove)_", t.bare):
+            return None
         tokens = set(re.split(r"[_\-]+", t.bare))
         if tokens & OUTBOUND_VERBS or _OUTBOUND_BARE.search(t.bare) \
                 or _any(cfg.get("extra_outbound_tools", []), t.bare):
             return f"outbound tool {t.name}"
     return None
+
+
+# ---------------------------------------------------------------------------
+# git destinations (for trusted_git_remotes)
+
+_REMOTE_URL = re.compile(r"^(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/]+(.+?)(?:\.git)?/?$", re.I)
+
+
+def normalize_remote(url: str) -> str | None:
+    """git@github.com:o/r.git, https://github.com/o/r -> github.com/o/r"""
+    m = _REMOTE_URL.match((url or "").strip())
+    if not m or "/" not in m.group(2):
+        return None
+    return f"{m.group(1).lower()}/{m.group(2).strip('/')}".lower()
+
+
+def _remote_url(cwd: str | None, remote: str) -> str | None:
+    import subprocess
+    try:
+        r = subprocess.run(["git", "-C", cwd or ".", "remote", "get-url", "--push", remote],
+                           capture_output=True, text=True, timeout=2)
+        return r.stdout.strip() or None if r.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def _effective_cwd(cmd: str, upto: int, cwd: str | None) -> str | None:
+    """Directory a command segment runs in, following 'cd X' before it."""
+    for m in re.finditer(r"\b(?:cd|pushd)\s+(\"[^\"]*\"|'[^']*'|[^\s;&|]+)", cmd[:upto]):
+        d = m.group(1).strip("'\"")
+        cwd = _expand(d, cwd)
+    return cwd
+
+
+def git_destinations(cmd: str, cwd: str | None) -> list[str] | None:
+    """Repositories a git push / gh write in this command goes to, normalised as
+    host/owner/repo. None if any destination cannot be determined."""
+    out = []
+    for m in re.finditer(r"\bgit\s+(?:-C\s+(\"[^\"]*\"|'[^']*'|\S+)\s+)?push\b([^;&|]*)", cmd):
+        wd = _expand(m.group(1).strip("'\""), cwd) if m.group(1) else _effective_cwd(cmd, m.start(), cwd)
+        args = [a for a in m.group(2).split() if not a.startswith("-")]
+        target = args[0] if args else "origin"
+        url = target if ("/" in target or ":" in target) else _remote_url(wd, target)
+        dest = normalize_remote(url or "")
+        if not dest:
+            return None
+        out.append(dest)
+    for m in re.finditer(r"\bgh\s+(pr|issue|release)\b([^;&|]*)", cmd):
+        r = re.search(r"(?:-R|--repo)[=\s]+(\S+)", m.group(2))
+        if r:
+            repo = r.group(1).strip("'\"")
+            dest = normalize_remote(repo if "." in repo.split("/")[0] else "github.com/" + repo)
+        else:
+            dest = normalize_remote(_remote_url(_effective_cwd(cmd, m.start(), cwd), "origin") or "")
+        if not dest:
+            return None
+        out.append(dest)
+    return out
+
+
+def trusted_git_destination(cmd: str, cwd: str | None, cfg: dict) -> bool:
+    import fnmatch
+    pats = [p.lower().rstrip("/") for p in cfg.get("trusted_git_remotes", [])]
+    if not pats:
+        return False
+    dests = git_destinations(cmd, cwd)
+    if not dests:
+        return False
+    return all(any(fnmatch.fnmatchcase(d, p) for p in pats) for d in dests)
 
 
 def network_urls(t: Tool, tool_input: dict) -> list[str]:

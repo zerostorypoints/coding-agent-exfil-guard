@@ -128,6 +128,9 @@ def decide_pre(ev: Event, cfg: dict) -> Decision:
                    "Check the request in your session before approving.", "outbound-secret")
             return _finalize(cfg, ev, Decision(ASK, reason, findings=secrets,
                                                      summary="The agent is sending something that looks like a password or key."), "outbound-secret")
+        if tainted and ob in ("shell: git push", "shell: GitHub CLI write") and \
+                classify.trusted_git_destination(str(inp.get("command") or ""), ev.cwd, cfg):
+            return _finalize(cfg, ev, Decision(ALLOW, ob), "outbound-trusted-repo")
         if tainted:
             action = cfg.get("tainted_outbound_decision", ASK)
             reason = (f"exfil-guard: the agent wants to send something out ({ob}) after reading "

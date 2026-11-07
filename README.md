@@ -167,6 +167,7 @@ optional; see [config.example.json](config.example.json).
 | `notify_command` | built-in | argv with `{title}` and `{message}`, e.g. `["curl", "-s", "-d", "{title}: {message}", "https://ntfy.sh/<topic>"]` for phone alerts |
 | `trusted_domains` | `[]` | domains WebFetch/navigation may query with parameters in tainted sessions |
 | `trusted_servers` | app-internal | MCP server-name regexes to ignore |
+| `trusted_git_remotes` | `[]` | `git push` and `gh pr`/`issue`/`release` writes to these repos skip the tainted-session prompt. Globs on `host/owner/repo`, e.g. `["github.com/your-org/*"]`. Secrets are still checked. A public repo you own is still a way out, so list only owners whose pushes you are happy to allow |
 | `untrusted_paths` | `[]` | extra folders whose files taint on `Read` (e.g. an attachments folder) |
 | `extra_untrusted_read_tools`, `extra_outbound_tools` | `[]` | regexes on the bare tool name |
 | `extra_protected_paths` | `[]` | extra paths whose modification always asks |

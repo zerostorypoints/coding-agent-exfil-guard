@@ -4,6 +4,7 @@
   "notify_min_severity": "high",
   "notify_command": null,
   "trusted_domains": ["docs.python.org"],
+  "trusted_git_remotes": ["github.com/your-org/*"],
   "extra_outbound_tools": [],
   "extra_protected_paths": [],
   "gate_browser_input": true
