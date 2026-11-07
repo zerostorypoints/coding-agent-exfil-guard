@@ -48,6 +48,18 @@ def taint(agent: str, session: str, reason: str, tool: str) -> dict:
     return st
 
 
+def set_key(agent: str, session: str, key: str, value) -> None:
+    st = get(agent, session)
+    st.pop("_first", None)
+    st[key] = value
+    p = _session_file(agent, session)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    with open(tmp, "w") as f:
+        json.dump(st, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, p)
+
+
 def clear(agent: str, session: str) -> bool:
     try:
         _session_file(agent, session).unlink()

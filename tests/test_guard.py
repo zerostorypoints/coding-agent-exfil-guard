@@ -187,6 +187,42 @@ class Windows(unittest.TestCase):
             finally:
                 os.environ.pop("EXFIL_GUARD_HOME", None)
 
+    def test_worktree_files_are_not_agent_config(self):
+        wt = "/Users/u/repo/.claude/worktrees/feature-x"
+        bash = classify.parse_tool("Bash")
+        edit = classify.parse_tool("Edit")
+        self.assertIsNone(classify.protected_write(edit, {"file_path": wt + "/src/app.ts"}, self.cfg))
+        self.assertIsNone(classify.protected_write(bash, {"command": "sed -i 's/a/b/' src/x.ts"}, self.cfg, wt))
+        self.assertIsNone(classify.protected_write(bash, {"command": "cat > e2e/a.spec.ts <<'EOF'\nx\nEOF"}, self.cfg, wt))
+        self.assertEqual(classify.protected_write(edit, {"file_path": wt + "/CLAUDE.md"}, self.cfg)[0], classify.TAINTED)
+        self.assertEqual(classify.protected_write(edit, {"file_path": wt + "/.claude/settings.json"}, self.cfg)[0],
+                         classify.ALWAYS)
+
+    def test_gh_read_commands_are_not_outbound(self):
+        bash = classify.parse_tool("Bash")
+        for cmd in ("gh issue list --state all", "gh pr view 610", "gh pr checks", "gh pr diff 3"):
+            self.assertIsNone(classify.outbound(bash, {"command": cmd}, self.cfg), cmd)
+        for cmd in ("gh pr comment 610 --body x", "gh issue edit 608 --add-label y", "gh pr create -t a"):
+            self.assertTrue(classify.outbound(bash, {"command": cmd}, self.cfg), cmd)
+
+    def test_local_dev_server_does_not_taint(self):
+        from exfil_guard import policy, state, config
+        with tempfile.TemporaryDirectory() as h:
+            os.environ["EXFIL_GUARD_HOME"] = h
+            try:
+                cfg = dict(config.DEFAULTS, notify_command=["true"])
+                ev = lambda tool, inp, s="loc": policy.Event("t", "post", s, tool, inp, "page text")
+                policy.decide(ev("Bash", {"command": "curl -s http://localhost:3000/api"}), cfg)
+                policy.decide(ev("mcp__Claude_Browser__preview_start", {"name": "web"}), cfg)
+                policy.decide(ev("mcp__Claude_Browser__read_page", {}), cfg)
+                self.assertFalse(state.get("t", "loc").get("tainted"))
+                policy.decide(ev("mcp__Claude_Browser__navigate", {"url": "https://example.com"}), cfg)
+                self.assertTrue(state.get("t", "loc").get("tainted"))
+                policy.decide(ev("Bash", {"command": "curl -s https://example.com"}, "ext"), cfg)
+                self.assertTrue(state.get("t", "ext").get("tainted"))
+            finally:
+                os.environ.pop("EXFIL_GUARD_HOME", None)
+
     def test_windows_toast_passes_text_via_env(self):
         from exfil_guard import notify
         argv, env = notify.build_argv({}, "t'it\"le", "m$(calc)", "high", platform="win32")

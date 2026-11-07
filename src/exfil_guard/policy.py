@@ -149,6 +149,17 @@ def decide_post(ev: Event, cfg: dict) -> Decision:
     if classify.is_trusted_server(t, cfg) or t.name in classify.SELF_ECHO_TOOLS:
         return d
     src = classify.untrusted_source(t, ev.tool_input or {}, cfg)
+    if src and classify.is_browser(t):
+        # Previewing your own dev server is not untrusted input. Remember what the
+        # tab was pointed at so later reads of the same page are judged the same way.
+        key = "browser_local:" + (t.server or t.name)
+        local = classify.browser_target_local(t, ev.tool_input or {})
+        if local is not None:
+            state.set_key(ev.agent, ev.session, key, local)
+        else:
+            local = state.get(ev.agent, ev.session).get(key, False)
+        if local:
+            src = None
     findings = detect.scan_text(ev.output or "")
     if src:
         st = state.taint(ev.agent, ev.session, src, ev.tool)

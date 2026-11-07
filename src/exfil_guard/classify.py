@@ -118,6 +118,27 @@ def _under(path: str, base: str) -> bool:
     return a == b or a.startswith(b + "/")
 
 
+_LOCAL_HOST = re.compile(r"^(localhost|127\.\d+\.\d+\.\d+|\[?::1\]?|0\.0\.0\.0|[^.]+\.localhost|.+\.test)$", re.I)
+
+
+def is_local_url(url: str) -> bool:
+    return bool(_LOCAL_HOST.match(_host(url)))
+
+
+def browser_target_local(t: Tool, tool_input: dict) -> bool | None:
+    """For browser calls that choose what the tab shows: is it a local dev server?
+    None when the call does not change the page."""
+    if t.bare not in ("navigate", "preview_start"):
+        return None
+    url = str(tool_input.get("url") or "")
+    if not url:
+        # preview_start by name starts a dev server from .claude/launch.json
+        return True if t.bare == "preview_start" else None
+    if url in ("back", "forward"):
+        return None
+    return is_local_url(url if "://" in url else "https://" + url)
+
+
 def untrusted_source(t: Tool, tool_input: dict, cfg: dict) -> str | None:
     """Reason string if this call's output should be treated as untrusted."""
     if is_trusted_server(t, cfg):
@@ -137,7 +158,8 @@ def untrusted_source(t: Tool, tool_input: dict, cfg: dict) -> str | None:
                     return f"downloaded file {fp}"
     if t.name in SHELL_TOOLS:
         cmd = str(tool_input.get("command") or "")
-        if _NET_FETCH.search(cmd) and urls_in(cmd):
+        urls = urls_in(cmd) if _NET_FETCH.search(cmd) else []
+        if any(not is_local_url(u) for u in urls):
             return "network fetch in shell command"
     return None
 
@@ -161,7 +183,10 @@ _OUTBOUND_BARE = re.compile(
 
 _BASH_OUTBOUND = [
     (r"\bgit\s+push\b", "git push"),
-    (r"\bgh\s+(pr|issue|gist|release|repo\s+create|secret)\b", "GitHub CLI write"),
+    (r"\bgh\s+(pr\s+(create|merge|comment|edit|review|close|reopen|ready)"
+     r"|issue\s+(create|comment|edit|close|reopen|transfer|delete|develop)"
+     r"|gist\s+(create|edit)|release\s+(create|upload|edit)|repo\s+(create|fork)|secret\s+set)\b",
+     "GitHub CLI write"),
     (r"\bgh\s+api\b.*(-X\s*(POST|PUT|PATCH|DELETE)|--method\s+(POST|PUT|PATCH|DELETE)|-f\s|-F\s|--field|--input)", "GitHub API write"),
     (r"\bcurl\b.*(\s-d\b|--data|\s-F\b|--form|\s-T\b|--upload-file|-X\s*(POST|PUT|PATCH)|--request\s+(POST|PUT|PATCH))", "HTTP upload via curl"),
     (r"\bwget\b.*--(post|body)", "HTTP upload via wget"),
@@ -269,10 +294,16 @@ _TAINTED_PATTERNS = [
 ]
 
 
+_WORKTREE = re.compile(r"/\.claude/worktrees/[^/]+(/|$)")
+
+
 def protected_level(path: str, cfg: dict, cwd: str | None = None) -> str | None:
     if not path:
         return None
     p = _expand(path, cwd)
+    # Claude Code worktrees live in <repo>/.claude/worktrees/<name>/. Inside one,
+    # paths are relative to that worktree root, not to the repo's .claude/ folder.
+    p = _WORKTREE.sub("/", p)
     for extra in cfg.get("extra_protected_paths", []):
         if _under(p, _expand(extra)):
             return ALWAYS
@@ -332,6 +363,8 @@ def protected_write(t: Tool, tool_input: dict, cfg: dict, cwd: str | None = None
         if not _WRITE_OP.search(cmd):
             return None
         best = None
+        # Directory changes are not writes: drop "cd <dir>" and "git -C <dir>".
+        cmd = re.sub(r"\b(cd|pushd)\s+(\"[^\"]*\"|'[^']*'|\S+)|\bgit\s+-C\s+(\"[^\"]*\"|'[^']*'|\S+)", " ", cmd)
         for tok in _path_tokens(cmd):
             lvl = protected_level(tok, cfg, cwd)
             if lvl == ALWAYS:
