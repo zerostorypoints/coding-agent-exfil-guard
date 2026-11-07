@@ -77,8 +77,9 @@ bin/exfil-guard doctor
 scripts/e2e-claude.sh
 ```
 
-When the log looks right, switch to enforcement with `{"mode": "enforce"}` (the default when no
-config exists).
+After a few days, run `bin/exfil-guard review` to see what the guard would have asked about and
+[mark what you do on purpose as safe](#marking-traffic-as-safe). Then switch to enforcement with
+`{"mode": "enforce"}` (the default when no config exists).
 
 **Rollback**, from a terminal (it does not depend on the hooks):
 
@@ -105,6 +106,9 @@ After any of these calls, the session is marked tainted for the rest of its life
 - shell commands that fetch from the network (`curl`, `wget`, `Invoke-WebRequest`, `git clone`…)
 - **any** tool whose output trips a detector (below)
 
+Your own local dev server does not taint: `localhost`, `127.x`, `*.localhost` and `*.test` in
+shell fetches, and the browser preview of a local server, including later reads of that page.
+
 ### Detectors: what raises an alert
 
 | Detector | Example |
@@ -115,19 +119,26 @@ After any of these calls, the session is marked tainted for the rest of its life
 | Exfiltration markup | Markdown images whose URL carries a long query string |
 
 A hit adds a warning to the model's context (treat it as data, quote it to the user), shows a
-line in your session, sends a desktop notification and taints the session. Detectors never
-block on their own. Only literal text addressed to an agent counts; topic words such as "AI agents
+plain-language line in your session and taints the session. Instruction overrides and hidden
+Unicode text also send a desktop notification. Detectors never block on their own. Only literal text addressed to an agent counts; topic words such as "AI agents
 can run privately" do not.
 
 ### Gates: what needs your approval
 
 | Situation | Decision |
 |---|---|
-| Outbound call in a tainted session: MCP send/reply/forward/post/publish/share/upload/draft/comment tools, Drive file create/update, calendar events, PRs/issues/gists, `git push`, `gh pr/issue/gist`, `curl -d/-F/-T`, `scp`, `rsync`, `nc`, PowerShell `Invoke-RestMethod -Method Post`, `Send-MailMessage`, browser typing/form fill/upload, WebFetch or navigation with a query string | **ask** |
+| Outbound call in a tainted session: MCP send/reply/forward/post/publish/share/upload/draft/comment tools, Drive file create/update, calendar events, PRs/issues/gists, `git push`, `gh pr create/comment/merge`, `gh issue create/edit`…, `curl -d/-F/-T`, `scp`, `rsync`, data piped or written over `ssh`, `nc`, PowerShell `Invoke-RestMethod -Method Post`, `Send-MailMessage`, browser typing/form fill/upload, WebFetch or navigation with a query string | **ask**, unless covered by `trusted_git_remotes` or one of your `allow_rules` |
 | Request URL carrying an encoded blob or a secret (API keys, tokens, private keys, JWTs) | **deny**, any session |
 | Outbound call whose payload contains a secret | **ask**, any session |
 | Write to agent config or persistence: `~/.claude/settings*.json`, hooks, agents, skills, plugins, `.mcp.json`, `~/.codex/`, managed settings, shell rc files, LaunchAgents, scheduled tasks, Run keys, `~/.ssh`, git hooks, this guard's own files, `claude plugin disable` | **ask**, any session |
-| Edit of agent instructions or memory: `CLAUDE.md`, `AGENTS.md`, memory files, CI workflows | **ask** in a tainted session |
+| Edit of agent instructions or memory: `CLAUDE.md`, `AGENTS.md`, memory files, CI workflows, the project's `.claude/` folder | **ask** in a tainted session |
+
+Not outbound: read-only commands and tools such as `gh issue list`, `gh pr view`,
+`ssh host 'cat log'`, and MCP `get_*`, `list_*`, `search_*`, `read_*`, `delete_*` tools.
+
+Inside a Claude Code worktree (`<repo>/.claude/worktrees/<name>/`) paths are judged relative to
+the worktree, so ordinary code changes are not mistaken for agent configuration, while the
+worktree's own `CLAUDE.md` and `.claude/settings.json` stay protected.
 
 MCP tools are matched on the last `__` segment of their name, so connectors that carry a
 per-install UUID (`mcp__0a1b2c3d-…__send_message`) are covered without configuration. Tool calls
@@ -174,10 +185,16 @@ optional; see [config.example.json](config.example.json).
 | `extra_protected_paths` | `[]` | extra paths whose modification always asks |
 | `gate_browser_input` | `true` | gate typing, form fill and uploads in browser tools when tainted |
 
-Where alerts appear: a line in your session (`systemMessage`), a warning in the model's context
-after a suspected injection (`additionalContext`), the approval prompt with the reason in
-`enforce` mode, and a desktop notification (macOS Notification Center, `notify-send` on Linux,
-a toast on Windows).
+Where alerts appear:
+
+- a plain-language line in your session (`systemMessage`), for example *"The agent is sending
+  something out (shell: git push) after reading outside content. In enforce mode it would have
+  asked you first."* In the desktop app it may sit inside the collapsed tool-call row;
+- a warning in the model's context after a suspected injection (`additionalContext`);
+- the approval prompt with the reason, in `enforce` mode;
+- a desktop notification (macOS Notification Center, `notify-send` on Linux, a toast on Windows),
+  by default only for critical events: a blocked exfiltration attempt, a secret in an outbound
+  call, an instruction override or hidden text.
 
 On macOS, install [terminal-notifier](https://github.com/julienXX/terminal-notifier)
 (`brew install terminal-notifier`) and the guard uses it. Without it the guard falls back to
@@ -210,9 +227,8 @@ Every field present must match. `destination` is a glob over the call's destinat
 `git:github.com/owner/repo`, `ssh:host`, `http:host`, `mcp:server/tool`, `path:/abs/path`.
 A call with several destinations matches only if all of them do. `destination` may also be a
 list of globs; a suggested rule for a path inside a worktree covers the repository and all its
-worktrees. `tool` is a regex on the tool
-name, `command` a regex searched in the command or path, `category` is `outbound` or
-`protected-write`.
+worktrees. `tool` is a regex on the tool name, `command` a regex searched in the command or
+path, `category` is `outbound` or `protected-write`.
 
 Rules never override a denied exfiltration-shaped URL, a secret in an outbound call, or a write
 to the guard's own configuration. When the agent itself runs `exfil-guard allow` or
@@ -257,10 +273,13 @@ machine**. Please run the e2e test and report the result.
 - **Combine it with the built-in controls:** the sandbox with an empty network allowlist, explicit
   `ask`/`deny` permission rules for outbound tools, and
   [managed settings](https://code.claude.com/docs/en/settings) for rules the agent cannot edit.
-- **Taint is per session and does not decay.** A session that browses and then acts will ask
-  often. Split research and action into separate sessions.
+- **Taint is per session and does not decay.** Most coding sessions search the web at some
+  point, so most become tainted. List your own repositories in `trusted_git_remotes`, mark
+  routine destinations with `allow_rules`, and split research and action into separate sessions
+  where it matters.
 - **False positives** happen on documents *about* prompt injection, this README included. They
-  alert and taint; they never block by themselves.
+  alert and taint; they never block by themselves. Shell writes are matched as text too, so a
+  command that only reads a protected file but also contains a write operator may still ask.
 - **Text already read stays in the context.** The warning cannot make the model unread it.
 - **Local Claude Code only** (CLI and desktop app). claude.ai on the web and mobile apps do not run
   local hooks.
