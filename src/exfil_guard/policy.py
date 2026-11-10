@@ -116,6 +116,11 @@ def decide_pre(ev: Event, cfg: dict) -> Decision:
             if rule:
                 return _finalize(cfg, ev, Decision(ALLOW, f"allowed by your rule: {rule.get('note') or rule}"),
                                  "user-rule")
+            weak = set(cfg.get("memory_writes_ok_after", []))
+            sources = [r.get("tool") for r in st.get("reasons", [])]
+            if level == classify.TAINTED and weak and dests and classify.is_memory_path(dests[0][5:]) \
+                    and sources and len(sources) < 50 and all(src in weak for src in sources):
+                return _finalize(cfg, ev, Decision(ALLOW, desc), "memory-after-weak-taint")
             why = "agent configuration/persistence" if level == classify.ALWAYS else \
                   f"agent instructions in a session that read {_tainted_summary(st)}"
             reason = f"exfil-guard: {desc} modifies {why}. Approve only if you asked for this change."

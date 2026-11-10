@@ -38,6 +38,10 @@ DEFAULTS: dict = {
     # session. Glob patterns on host/owner/repo, e.g. "github.com/your-org/*".
     # A public repo is still a way out: list only owners whose pushes you trust.
     "trusted_git_remotes": [],
+    # Tools whose output is treated as too weak a source to gate memory writes.
+    # When every reason a session is tainted comes from these tools, writes to the
+    # agent's memory files do not prompt. E.g. ["WebSearch"]: search-result snippets.
+    "memory_writes_ok_after": [],
     # MCP server names (regex, matched against the server segment of the tool name)
     # whose tools are never treated as untrusted sources or outbound sinks.
     "trusted_servers": [r"^ccd_", r"^visualize$"],

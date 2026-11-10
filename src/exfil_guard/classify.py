@@ -476,6 +476,13 @@ _WORKTREE = re.compile(r"/\.claude/worktrees/[^/]+(/|$)")
 _CLAUDE_DATA = re.compile(r"/\.claude/(projects/[^/]+/(?!memory/)|uploads/|shell-snapshots/|todos/|debug/)")
 
 
+_MEMORY = re.compile(r"/\.claude/projects/[^/]+/memory/|/memory/[^/]+\.md$")
+
+
+def is_memory_path(path: str) -> bool:
+    return bool(_MEMORY.search(path))
+
+
 def protected_level(path: str, cfg: dict, cwd: str | None = None) -> str | None:
     if not path:
         return None

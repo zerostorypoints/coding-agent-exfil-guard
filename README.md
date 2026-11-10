@@ -179,6 +179,7 @@ optional; see [config.example.json](config.example.json).
 | `trusted_domains` | `[]` | domains WebFetch/navigation may query with parameters in tainted sessions. A plain domain covers its subdomains; `*` makes a glob, e.g. `myapp-*-myteam.vercel.app` for Vercel previews |
 | `query_value_max_len` | `32` | shorter query values (search terms, ids) do not prompt unless they look like an e-mail or phone number. A short value can still carry a name; `0` asks for every query string |
 | `trusted_servers` | app-internal | MCP server-name regexes to ignore |
+| `memory_writes_ok_after` | `[]` | tools too weak to gate memory writes, e.g. `["WebSearch"]`: when every taint reason in a session comes from them, writes to the agent's memory files do not prompt |
 | `allow_rules` | `[]` | traffic you marked as safe, see [Marking traffic as safe](#marking-traffic-as-safe) |
 | `trusted_git_remotes` | `[]` | `git push` and `gh pr`/`issue`/`release` writes to these repos skip the tainted-session prompt. Globs on `host/owner/repo`, e.g. `["github.com/your-org/*"]`. Secrets are still checked. A public repo you own is still a way out, so list only owners whose pushes you are happy to allow |
 | `untrusted_paths` | `[]` | extra folders whose files taint on `Read` (e.g. an attachments folder) |
