@@ -328,6 +328,19 @@ class Windows(unittest.TestCase):
             finally:
                 os.environ.pop("EXFIL_GUARD_HOME", None)
 
+    def test_query_strings_and_trusted_domain_globs(self):
+        wf = classify.parse_tool("WebFetch")
+        nav = classify.parse_tool("mcp__Claude_Browser__navigate")
+        ob = lambda t, url, cfg=self.cfg: classify.outbound(t, {"url": url}, cfg)
+        self.assertIsNone(ob(wf, "https://www.blu-ray.com/search/?quicksearch=1&keyword=alien"))
+        self.assertTrue(ob(wf, "https://x.example/?q=jan.kowalski@example.com"))
+        self.assertTrue(ob(wf, "https://x.example/?tel=+48 600 123 456"))
+        self.assertTrue(ob(wf, "https://x.example/?d=" + "a" * 40))
+        self.assertTrue(ob(wf, "https://x.example/?q=a", dict(self.cfg, query_value_max_len=0)))
+        cfg = dict(self.cfg, trusted_domains=["hifisync-*-myteam.vercel.app"], query_value_max_len=0)
+        self.assertIsNone(ob(nav, "https://hifisync-k91w-myteam.vercel.app/x?a=1", cfg))
+        self.assertTrue(ob(nav, "https://hifisync-k91w-other.vercel.app/x?a=1", cfg))
+
     def test_windows_toast_passes_text_via_env(self):
         from exfil_guard import notify
         argv, env = notify.build_argv({}, "t'it\"le", "m$(calc)", "high", platform="win32")

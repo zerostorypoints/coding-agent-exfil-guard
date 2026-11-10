@@ -15,7 +15,7 @@ import os
 import re
 import shlex
 from dataclasses import dataclass, field
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from .detect import urls_in
 
@@ -224,11 +224,31 @@ def _host(url: str) -> str:
 
 
 def _trusted_host(host: str, cfg: dict) -> bool:
+    import fnmatch
     for d in cfg.get("trusted_domains", []):
         d = d.lower().lstrip(".")
-        if host == d or host.endswith("." + d):
+        if "*" in d or "?" in d:
+            if fnmatch.fnmatchcase(host, d):
+                return True
+        elif host == d or host.endswith("." + d):
             return True
     return False
+
+
+_PERSONAL = re.compile(r"[^@\s]+@[^@\s]+\.[a-z]{2,}|\+?\d[\d\s().-]{8,}\d", re.I)
+
+
+def query_carries_data(url: str, cfg: dict) -> bool:
+    """A query string worth asking about: a long value, or one that looks like an
+    e-mail address or a phone/account number. Short search terms and ids are not."""
+    limit = int(cfg.get("query_value_max_len", 32))
+    if limit <= 0:
+        return bool(urlsplit(url).query)
+    try:
+        pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
+    except ValueError:
+        return True
+    return any(len(v) > limit or _PERSONAL.search(v) for _, v in pairs)
 
 
 def outbound(t: Tool, tool_input: dict, cfg: dict) -> str | None:
@@ -237,7 +257,7 @@ def outbound(t: Tool, tool_input: dict, cfg: dict) -> str | None:
         return None
     if t.name == "WebFetch":
         url = str(tool_input.get("url") or "")
-        if urlsplit(url).query and not _trusted_host(_host(url), cfg):
+        if urlsplit(url).query and not _trusted_host(_host(url), cfg) and query_carries_data(url, cfg):
             return f"WebFetch with query string to {_host(url)}"
         return None
     if t.name in SHELL_TOOLS:
@@ -252,7 +272,7 @@ def outbound(t: Tool, tool_input: dict, cfg: dict) -> str | None:
             return "browser typing"
         if t.bare in ("navigate",) and urlsplit(str(tool_input.get("url") or "")).query:
             url = str(tool_input.get("url"))
-            if not _trusted_host(_host(url), cfg):
+            if not _trusted_host(_host(url), cfg) and query_carries_data(url, cfg):
                 return f"browser navigation with query string to {_host(url)}"
         return None
     if t.is_mcp:

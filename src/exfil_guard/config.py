@@ -27,8 +27,13 @@ DEFAULTS: dict = {
     # appears inside the session and in the log. "medium" adds every outbound call after
     # untrusted input and weaker injection signals.
     "notify_min_severity": "high",
-    # Domains WebFetch/browser may query even when the session is tainted.
+    # Domains WebFetch/browser may query even when the session is tainted. A plain
+    # domain also covers its subdomains; "*" and "?" make a glob on the host name.
     "trusted_domains": [],
+    # WebFetch/navigation with a query string asks in a tainted session only when a
+    # value is longer than this or looks like an e-mail or phone/account number.
+    # 0 = ask for every query string.
+    "query_value_max_len": 32,
     # git push / gh pr|issue|release to these repositories is allowed in a tainted
     # session. Glob patterns on host/owner/repo, e.g. "github.com/your-org/*".
     # A public repo is still a way out: list only owners whose pushes you trust.

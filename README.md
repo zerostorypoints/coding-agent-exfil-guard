@@ -127,7 +127,7 @@ can run privately" do not.
 
 | Situation | Decision |
 |---|---|
-| Outbound call in a tainted session: MCP send/reply/forward/post/publish/share/upload/draft/comment tools, Drive file create/update, calendar events, PRs/issues/gists, `git push`, `gh pr create/comment/merge`, `gh issue create/edit`…, `curl -d/-F/-T`, `scp`, `rsync`, data piped or written over `ssh`, `nc`, PowerShell `Invoke-RestMethod -Method Post`, `Send-MailMessage`, browser typing/form fill/upload, WebFetch or navigation with a query string | **ask**, unless covered by `trusted_git_remotes` or one of your `allow_rules` |
+| Outbound call in a tainted session: MCP send/reply/forward/post/publish/share/upload/draft/comment tools, Drive file create/update, calendar events, PRs/issues/gists, `git push`, `gh pr create/comment/merge`, `gh issue create/edit`…, `curl -d/-F/-T`, `scp`, `rsync`, data piped or written over `ssh`, `nc`, PowerShell `Invoke-RestMethod -Method Post`, `Send-MailMessage`, browser typing/form fill/upload, WebFetch or navigation whose query string carries data (a value longer than 32 characters, an e-mail address or a phone/account number) | **ask**, unless covered by `trusted_git_remotes` or one of your `allow_rules` |
 | Request URL carrying an encoded blob or a secret (API keys, tokens, private keys, JWTs) | **deny**, any session |
 | Outbound call whose payload contains a secret | **ask**, any session |
 | Write to agent config or persistence: `~/.claude/settings*.json`, hooks, agents, skills, plugins, `.mcp.json`, `~/.codex/`, managed settings, shell rc files, LaunchAgents, scheduled tasks, Run keys, `~/.ssh`, git hooks, this guard's own files, `claude plugin disable` | **ask**, any session |
@@ -176,7 +176,8 @@ optional; see [config.example.json](config.example.json).
 | `desktop_notifications` | `true` | `false` keeps alerts inside the session only |
 | `notify_min_severity` | `high` | `high`: desktop alerts only for critical events (blocked exfiltration, a secret in an outbound call, an attempt to override the agent). `medium` adds every outbound call after untrusted input |
 | `notify_command` | built-in | argv with `{title}` and `{message}`, e.g. `["curl", "-s", "-d", "{title}: {message}", "https://ntfy.sh/<topic>"]` for phone alerts |
-| `trusted_domains` | `[]` | domains WebFetch/navigation may query with parameters in tainted sessions |
+| `trusted_domains` | `[]` | domains WebFetch/navigation may query with parameters in tainted sessions. A plain domain covers its subdomains; `*` makes a glob, e.g. `myapp-*-myteam.vercel.app` for Vercel previews |
+| `query_value_max_len` | `32` | shorter query values (search terms, ids) do not prompt unless they look like an e-mail or phone number. A short value can still carry a name; `0` asks for every query string |
 | `trusted_servers` | app-internal | MCP server-name regexes to ignore |
 | `allow_rules` | `[]` | traffic you marked as safe, see [Marking traffic as safe](#marking-traffic-as-safe) |
 | `trusted_git_remotes` | `[]` | `git push` and `gh pr`/`issue`/`release` writes to these repos skip the tainted-session prompt. Globs on `host/owner/repo`, e.g. `["github.com/your-org/*"]`. Secrets are still checked. A public repo you own is still a way out, so list only owners whose pushes you are happy to allow |
