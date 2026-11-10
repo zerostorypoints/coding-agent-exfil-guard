@@ -210,6 +210,7 @@ mark it as safe instead of turning the guard off:
 bin/exfil-guard review          # what the guard asked about, in plain words, newest first (-v: details)
 bin/exfil-guard allow 3 --note "deploy scripts to my NAS"
 bin/exfil-guard rules           # list rules;  bin/exfil-guard rules rm 2  to delete one
+bin/exfil-guard replay          # how often enforce mode would ask, on your real sessions
 ```
 
 `allow` adds a rule to `allow_rules` in `config.json`. By default the rule matches the
@@ -234,6 +235,19 @@ path, `category` is `outbound` or `protected-write`.
 Rules never override a denied exfiltration-shaped URL, a secret in an outbound call, or a write
 to the guard's own configuration. When the agent itself runs `exfil-guard allow` or
 `rules rm`, the guard asks first, like any change to its configuration.
+
+### Measuring it on your own sessions
+
+```bash
+bin/exfil-guard replay --days 7
+```
+
+Runs the current guard, with your config in enforce mode, over the tool calls in your recent
+Claude Code transcripts (`~/.claude/projects`, or `$CLAUDE_CONFIG_DIR`). Nothing is executed and
+your real state is not touched. It prints how many approval prompts, blocks and injection alerts
+enforce mode would have produced, and the most frequent prompts. Use it before switching to
+`enforce` and after adding rules. Pushes from worktrees that no longer exist cannot be matched
+to a repository, so they count as prompts here even when `trusted_git_remotes` would cover them.
 
 ### Inspecting state
 

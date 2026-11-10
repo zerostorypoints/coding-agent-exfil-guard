@@ -266,6 +266,81 @@ def review(n: int = 2000, show: int = 20, verbose: bool = False) -> int:
     return 0
 
 
+def _transcript_text(c) -> str:
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return "\n".join(_transcript_text(x.get("text", "") if isinstance(x, dict) else x) for x in c)
+    return ""
+
+
+def replay(days: float = 3, show: int = 15) -> int:
+    """Run the current guard, with your config in enforce mode, over the tool calls in
+    your recent Claude Code transcripts. Nothing is executed and nothing is written
+    to your real state: it answers "how often would enforce mode ask, and about what"."""
+    import collections
+    import glob
+    import time
+    cfg = config.load()
+    cfg.update(mode="enforce", desktop_notifications=False)
+    root = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    cut = time.time() - days * 86400
+    files = [f for f in glob.glob(os.path.join(root, "projects", "*", "*.jsonl")) if os.path.getmtime(f) > cut]
+    counts: collections.Counter = collections.Counter()
+    about: collections.Counter = collections.Counter()
+    calls = 0
+    old = os.environ.get("EXFIL_GUARD_HOME")
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["EXFIL_GUARD_HOME"] = tmp
+        try:
+            for f in files:
+                sess, pending = os.path.basename(f)[:-6], {}
+                for line in open(f, errors="ignore"):
+                    try:
+                        o = json.loads(line)
+                    except ValueError:
+                        continue
+                    content = (o.get("message") or {}).get("content")
+                    if not isinstance(content, list):
+                        continue
+                    for b in content:
+                        if not isinstance(b, dict):
+                            continue
+                        if b.get("type") == "tool_use":
+                            calls += 1
+                            inp = b.get("input") or {}
+                            ev = policy.Event("claude-code", "pre", sess, b.get("name", ""), inp, "", o.get("cwd"))
+                            d = policy.decide(ev, cfg)
+                            if d.action != policy.ALLOW:
+                                counts[d.action] += 1
+                            pending[b.get("id")] = (b.get("name", ""), inp, o.get("cwd"))
+                        elif b.get("type") == "tool_result" and b.get("tool_use_id") in pending:
+                            n, inp, cwd = pending.pop(b["tool_use_id"])
+                            d = policy.decide(policy.Event("claude-code", "post", sess, n, inp,
+                                                           _transcript_text(b.get("content")), cwd), cfg)
+                            if d.user_message:
+                                counts["injection alert"] += 1
+            for e in state.recent(10 ** 7):
+                if e.get("category") in _REVIEW_CATS and e.get("action"):
+                    about[_describe({**e, "count": 1})[0][:140]] += 1
+            tainted = len(list((config.state_dir() / "sessions").glob("*.json"))) \
+                if (config.state_dir() / "sessions").exists() else 0
+        finally:
+            if old is None:
+                os.environ.pop("EXFIL_GUARD_HOME", None)
+            else:
+                os.environ["EXFIL_GUARD_HOME"] = old
+    print(f"{len(files)} sessions from the last {days:g} days, {calls} tool calls, "
+          f"{tainted} sessions read outside content.")
+    print(f"In enforce mode: {counts['ask']} approval prompts, {counts['deny']} blocked calls, "
+          f"{counts['injection alert']} injection alerts.")
+    if about:
+        print("\nMost frequent prompts:")
+        for what, n in about.most_common(show):
+            print(f"  {n:>5}x  {what}")
+    return 0
+
+
 def allow(rest: list[str]) -> int:
     from . import rules
     if not rest or not rest[0].isdigit():
@@ -313,7 +388,7 @@ def list_rules(rest: list[str]) -> int:
 def main(argv: list[str]) -> int:
     if not argv:
         print(__doc__ or "", end="")
-        print("usage: exfil-guard {review|allow N|rules [rm N]|status|sessions|untaint|selftest|doctor|hook claude}")
+        print("usage: exfil-guard {review|allow N|rules [rm N]|replay [--days N]|status|sessions|untaint|selftest|doctor|hook claude}")
         return 2
     cmd, rest = argv[0], argv[1:]
     if cmd == "hook":
@@ -341,6 +416,9 @@ def main(argv: list[str]) -> int:
     if cmd == "review":
         nums = [a for a in rest if a.isdigit()]
         return review(show=int(nums[0]) if nums else 20, verbose="-v" in rest)
+    if cmd == "replay":
+        days = float(rest[rest.index("--days") + 1]) if "--days" in rest else 3
+        return replay(days)
     if cmd == "allow":
         return allow(rest)
     if cmd == "rules":

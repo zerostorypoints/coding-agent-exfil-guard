@@ -190,13 +190,14 @@ _BASH_OUTBOUND = [
     (r"\bgh\s+api\b.*(-X\s*(POST|PUT|PATCH|DELETE)|--method\s+(POST|PUT|PATCH|DELETE)|-f\s|-F\s|--field|--input)", "GitHub API write"),
     (r"\bcurl\b.*(\s-d\b|--data|\s-F\b|--form|\s-T\b|--upload-file|-X\s*(POST|PUT|PATCH)|--request\s+(POST|PUT|PATCH))", "HTTP upload via curl"),
     (r"\bwget\b.*--(post|body)", "HTTP upload via wget"),
-    (r"\b(scp|sftp|rsync|rclone)\b", "file transfer"),
-    (r"\b(nc|ncat|netcat|socat|telnet)\b\s", "raw socket"),
+    (r"(^|[;&|(\n]|\$\()\s*(sudo\s+)?(scp|sftp|rsync|rclone)\s", "file transfer"),
+    # nc -z only probes a port and sends nothing
+    (r"(^|[;&|(\n]|\$\()\s*(sudo\s+)?(nc|ncat|netcat|socat|telnet)\s+(?!(?:[^;&|\n]*\s)?-[a-zA-Z]*z)", "raw socket"),
     (r"(^|[;&|(]|\$\()\s*(sendmail|mail|mailx|mutt)\s", "local mail"),
     (r"osascript\b.*\b(Mail|Messages|Slack|Outlook)\b", "AppleScript messaging"),
     # Data piped or redirected into ssh, or written on the remote side. Plain reads
     # over ssh (ssh host 'cat log') bring data in, not out.
-    (r"\|\s*ssh\b|\bssh\b[^|;&]*\s<\s*\S|\bssh\b\s+\S+.*(\bcat\s*>|\btee\b|\bdd\b.*\bof=|\bcurl\b)",
+    (r"\|\s*ssh\s|\bssh\s[^|;&]*\s<\s*\S|\bssh\s+\S+.*(\bcat\s*>|\btee\b|\bdd\b.*\bof=|\bcurl\b)",
      "remote command"),
     # PowerShell (Windows)
     (r"\b(Invoke-WebRequest|iwr|Invoke-RestMethod|irm)\b.*(-Method\s+['\"]?(Post|Put|Patch)\b|-Body\b|-InFile\b|-Form\b)",
@@ -209,9 +210,28 @@ _BASH_OUTBOUND = [
 ]
 
 
+_HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1([^\n]*)\n(.*?)\n[ \t]*\2[ \t]*(?=\n|$)", re.S)
+_HEREDOC_RUNS = re.compile(r"\b(bash|sh|zsh|ksh|dash|ssh|pwsh|powershell)\b")
+
+
+def strip_heredoc_text(cmd: str) -> str:
+    """Drop heredoc bodies that are data (cat > file <<EOF, python - <<EOF). Bodies fed
+    to a shell or over ssh are commands and stay."""
+    def repl(m: re.Match) -> str:
+        line_start = cmd.rfind("\n", 0, m.start()) + 1
+        head = cmd[line_start:m.start()] + m.group(3)
+        return m.group(0) if _HEREDOC_RUNS.search(head) else f"<<{m.group(2)}{m.group(3)}"
+    return _HEREDOC.sub(repl, cmd)
+
+
 def bash_outbound(cmd: str) -> str | None:
+    cmd = strip_heredoc_text(cmd)
+    urls = urls_in(cmd)
     for rx, label in _BASH_OUTBOUND:
         if re.search(rx, cmd, re.I | re.S):
+            # an HTTP upload to your own machine does not leave it
+            if label.startswith("HTTP upload") and urls and all(is_local_url(u) for u in urls):
+                continue
             return label
     return None
 
@@ -321,7 +341,10 @@ def _effective_cwd(cmd: str, upto: int, cwd: str | None) -> str | None:
 def git_destinations(cmd: str, cwd: str | None) -> list[str] | None:
     """Repositories a git push / gh write in this command goes to, normalised as
     host/owner/repo. None if any destination cannot be determined."""
+    cmd = expand_assignments(cmd)
     out = []
+    for m in re.finditer(r"\bgh\s+(?:api\b[^;&|]*?\brepos/|repo\s+(?:edit|create|delete|rename)\s+)([\w.-]+)/([\w.-]+)", cmd):
+        out.append(f"github.com/{m.group(1)}/{m.group(2)}".lower())
     for m in re.finditer(r"\bgit\s+(?:-C\s+(\"[^\"]*\"|'[^']*'|\S+)\s+)?push\b([^;&|]*)", cmd):
         wd = _expand(m.group(1).strip("'\""), cwd) if m.group(1) else _effective_cwd(cmd, m.start(), cwd)
         args = [a for a in m.group(2).split() if not a.startswith("-")]
@@ -519,6 +542,8 @@ def protected_write(t: Tool, tool_input: dict, cfg: dict, cwd: str | None = None
         if not _WRITE_OP.search(cmd):
             return None
         best = None
+        # A script that is run is not written: drop paths in command position.
+        cmd = re.sub(r"(^|[;&|\n(`]\s*|\$\(\s*)(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*[~/][^\s;&|)`]*", r"\1", cmd)
         # Directory changes are not writes: drop "cd <dir>" and "git -C <dir>".
         cmd = re.sub(r"\b(cd|pushd)\s+(\"[^\"]*\"|'[^']*'|\S+)|\bgit\s+-C\s+(\"[^\"]*\"|'[^']*'|\S+)", " ", cmd)
         for tok in _path_tokens(cmd):
