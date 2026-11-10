@@ -93,6 +93,8 @@ def decide_pre(ev: Event, cfg: dict) -> Decision:
 
     # 1. Exfiltration-shaped URLs and secrets in requests: deny in any session.
     for url in classify.network_urls(t, inp):
+        if classify.is_local_url(url):  # your own machine: nothing leaves it
+            continue
         fs = detect.url_exfil_findings(url)
         if fs:
             reason = (f"exfil-guard blocked a request to {classify._host(url)}: "

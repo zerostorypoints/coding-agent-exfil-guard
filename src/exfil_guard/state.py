@@ -40,7 +40,7 @@ def taint(agent: str, session: str, reason: str, tool: str) -> dict:
         reasons.append({"ts": _now(), "tool": tool, "reason": reason})
     p = _session_file(agent, session)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")  # parallel hooks must not share a temp file
     with open(tmp, "w") as f:
         json.dump(st, f, ensure_ascii=False, indent=1)
     os.replace(tmp, p)
@@ -54,7 +54,7 @@ def set_key(agent: str, session: str, key: str, value) -> None:
     st[key] = value
     p = _session_file(agent, session)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")  # parallel hooks must not share a temp file
     with open(tmp, "w") as f:
         json.dump(st, f, ensure_ascii=False, indent=1)
     os.replace(tmp, p)

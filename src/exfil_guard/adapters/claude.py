@@ -75,7 +75,8 @@ def main() -> int:
         resp = to_response(ev, dec)
     except Exception as e:  # fail closed for pre-tool decisions
         try:
-            state.log({"agent": AGENT, "event": "guard-error", "tool": ev.tool, "reason": repr(e)})
+            state.log({"agent": AGENT, "event": "guard-error", "kind": ev.kind, "session": ev.session,
+                       "tool": ev.tool, "reason": repr(e)})
         except Exception:
             pass
         if ev.kind != "pre":

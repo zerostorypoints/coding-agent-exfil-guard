@@ -256,7 +256,8 @@ def outbound(t: Tool, tool_input: dict, cfg: dict) -> str | None:
                 return f"browser navigation with query string to {_host(url)}"
         return None
     if t.is_mcp:
-        if re.match(r"(get|list|search|read|fetch|delete|trash|remove)_", t.bare):
+        # gmail_get_draft, list_drafts, delete_draft: reading or removing is not sending
+        if re.search(r"(^|_)(get|list|search|read|fetch|delete|trash|remove)(_|$)", t.bare):
             return None
         tokens = set(re.split(r"[_\-]+", t.bare))
         if tokens & OUTBOUND_VERBS or _OUTBOUND_BARE.search(t.bare) \
@@ -341,11 +342,23 @@ def ssh_hosts(cmd: str) -> list[str]:
     return hosts
 
 
+_ASSIGN = re.compile(r"(?:^|[;&|\s])([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|[^\s;&|]+)")
+
+
+def expand_assignments(cmd: str) -> str:
+    """Substitute simple NAME=value assignments made in the same command,
+    so 'nas=me@host; ssh $nas' resolves to the host."""
+    env = {m.group(1): m.group(2).strip("'\"") for m in _ASSIGN.finditer(cmd)}
+    if not env:
+        return cmd
+    return re.sub(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", lambda m: env.get(m.group(1), m.group(0)), cmd)
+
+
 def destinations(t: Tool, tool_input: dict, cwd: str | None = None) -> list[str]:
     """Where a call sends data or writes, as typed strings for allow rules."""
     out: list[str] = []
     if t.name in SHELL_TOOLS:
-        cmd = str(tool_input.get("command") or "")
+        cmd = expand_assignments(str(tool_input.get("command") or ""))
         if re.search(r"\bgit\b[^;&|]*\bpush\b|\bgh\s+(pr|issue|release)\b", cmd):
             out += ["git:" + d for d in (git_destinations(cmd, cwd) or [])]
         out += ["ssh:" + h for h in ssh_hosts(cmd)]
@@ -415,6 +428,11 @@ _TAINTED_PATTERNS = [
 _WORKTREE = re.compile(r"/\.claude/worktrees/[^/]+(/|$)")
 
 
+# Claude Code's own session data (transcripts, tool results, uploads) is not
+# configuration; only memory/ under projects/ carries instructions.
+_CLAUDE_DATA = re.compile(r"/\.claude/(projects/[^/]+/(?!memory/)|uploads/|shell-snapshots/|todos/|debug/)")
+
+
 def protected_level(path: str, cfg: dict, cwd: str | None = None) -> str | None:
     if not path:
         return None
@@ -427,7 +445,7 @@ def protected_level(path: str, cfg: dict, cwd: str | None = None) -> str | None:
             return ALWAYS
     if _any(_ALWAYS_PATTERNS, p):
         return ALWAYS
-    if _any(_TAINTED_PATTERNS, p):
+    if _any(_TAINTED_PATTERNS, p) and not _CLAUDE_DATA.search(p):
         return TAINTED
     return None
 

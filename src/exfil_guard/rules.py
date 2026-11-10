@@ -120,7 +120,7 @@ def load_raw() -> dict:
 def save_raw(data: dict) -> None:
     p = config.config_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")  # parallel hooks must not share a temp file
     with open(tmp, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
         f.write("\n")

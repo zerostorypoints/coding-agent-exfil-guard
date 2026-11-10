@@ -304,6 +304,30 @@ class Windows(unittest.TestCase):
             self.assertTrue(rules.matches(r, "protected-write", "Bash", "", ["path:" + p]), p)
         self.assertFalse(rules.matches(r, "protected-write", "Bash", "", ["path:/u/other/.claude/hooks/a.sh"]))
 
+    def test_fixes_from_monitor_log_2026_11_10(self):
+        from exfil_guard import policy, config
+        bash = classify.parse_tool("Bash")
+        # variables assigned in the same command resolve
+        self.assertEqual(classify.destinations(bash, {"command": "nas=me@nas.local; cat x | ssh $nas 'cat > y'"}),
+                         ["ssh:nas.local"])
+        # Gmail read tools named <server>_get_* are not outbound
+        self.assertIsNone(classify.outbound(classify.parse_tool("mcp__octomail__gmail_get_draft"), {}, self.cfg))
+        # Claude Code's own tool-result files are not agent configuration
+        self.assertIsNone(classify.protected_level(
+            "/Users/u/.claude/projects/-Users-u-x/0f0e/tool-results/webfetch-1.pdf", self.cfg))
+        self.assertEqual(classify.protected_level("/Users/u/.claude/projects/-Users-u-x/memory/a.md", self.cfg),
+                         classify.TAINTED)
+        # a long query string to your own machine is not exfiltration
+        with tempfile.TemporaryDirectory() as h:
+            os.environ["EXFIL_GUARD_HOME"] = h
+            try:
+                cfg = dict(config.DEFAULTS, notify_command=["true"])
+                ev = policy.Event("t", "pre", "s", "mcp__Claude_Browser__navigate",
+                                  {"url": "http://localhost:3000/cb?state=" + "QUJD" * 30})
+                self.assertEqual(policy.decide(ev, cfg).action, "allow")
+            finally:
+                os.environ.pop("EXFIL_GUARD_HOME", None)
+
     def test_windows_toast_passes_text_via_env(self):
         from exfil_guard import notify
         argv, env = notify.build_argv({}, "t'it\"le", "m$(calc)", "high", platform="win32")
